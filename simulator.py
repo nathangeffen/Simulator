@@ -8,48 +8,88 @@ DEFAULT_ITERATIONS = 70
 DEFAULT_TRANSITION_PROBABILITY = 0.009
 DEFAULT_TRANSITION_BACK_PROBABILITY = 0.7
 
-def default_transition_function(value, 
-                                individuals,   
-                                index, # index of this state's individual 
-                                transition_probability=
-                                    DEFAULT_TRANSITION_PROBABILITY,
-                                transition_back_probability=
-                                    DEFAULT_TRANSITION_BACK_PROBABILITY):
+def state_incrementor():
+    counter = -1
+    while True:
+        counter += 1
+        yield counter
 
-    if value:
-        if random.random() < transition_back_probability:
+state_increment = state_incrementor().__next__ 
+
+class StateName:
+    
+    def __init__(self, label): 
+        self._index = state_increment()
+        self._label = label
+
+    def get_index(self):
+        return self._index
+
+    def get_label(self):
+        return self._label
+
+    def get_key(self):
+        return (self._index, self)
+            
+    index = property(get_index)
+    label = property(get_label)
+    key = property(get_key)
+
+def passes_filters(states, filters):
+    for _filter in filters:
+        if not _filter[1](states[_filter[0].key].value):
             return False
-        else:
-            return True
-    else:
-        if random.random() < transition_probability:
-            return True
-        else:
-            return False
-
-
-
+    return True
+    
 
 class State:    
     
     def __init__(self, value, transition_function=None, filters=[]):
-        self.value = value
+        
+        import types 
+        
+        if isinstance(value, types.FunctionType):
+            self.value = value()
+        else:
+            self.value = value
         
         if not transition_function:
-            self.transition_function = default_transition_function
+            self.transition_function = State.default_transition_function
         else:
             self.transition_function = transition_function
         self.filters = filters
 
+
     def passes_filters(self, states):
-        for _filter in self.filters:
-            if not _filter[1](states[_filter[0]].value):
-                return False
-        return True
+        return passes_filters(states, self.filters)
     
     def transition(self, individuals, index):
         if self.passes_filters(individuals[index].states):        
-            self.value = self.transition_function(self.value, individuals, index)
+            self.value = self.transition_function(self.value, 
+                                                  individuals[index].states,
+                                                  individuals, 
+                                                  index)
+
+    @staticmethod
+    def default_transition_function(value,
+                                    states, 
+                                    individuals,   
+                                    index, # index of this state's individual 
+                                    transition_probability=
+                                        DEFAULT_TRANSITION_PROBABILITY,
+                                    transition_back_probability=
+                                        DEFAULT_TRANSITION_BACK_PROBABILITY):
+    
+        if value:
+            if random.random() < transition_back_probability:
+                return False
+            else:
+                return True
+        else:
+            if random.random() < transition_probability:
+                return True
+            else:
+                return False
             
     def __str__(self):
         return str(self.value)
@@ -58,26 +98,24 @@ class Individual:
 
     def __init__(self, 
                  state_class=State,
-                 initial_states={'default' : {
-                                              'value': 0, 
-                                              'transition_function': None,
-                                              'filters' : [] }
-                                              },
-                 ):
-
+                 initial_states={}):
         self.states = {}
         for state in initial_states.items():
-            self.states[state[0]] = State(state[1]['value'],
+            self.add_state(state)
+
+    def add_state(self, state):
+        self.states[state[0].key] = State(state[1]['value'],
                                           state[1]['transition_function'], 
                                           state[1]['filters'])
 
+    
     def process_iteration(self, individuals, index):
         for state in self.states.values():
             state.transition(individuals, index)
 
     def __str__(self):
         output = ''
-        for state in self.states:
+        for state in self.states.values():
             output += str(state) + ' '
         return output
 
@@ -95,36 +133,119 @@ class Simulation:
     states  according to specified state functions.
     '''
     
-    default_dictionary = {'default': {
-                                'value': 0, 
-                                'transition_function': None,
-                                 'filters' : [] },
-                          }
-                          
-    
-    
     def __init__(self, 
                  population_size=DEFAULT_POPULATION_SIZE,
                  individual_class=Individual,
                  state_class=State,
-                 initial_states=default_dictionary,
+                 initial_states={},
                  iterations=DEFAULT_ITERATIONS,
-                 analysis_function=None):
-
+                 analysis_function=None,
+                 analysis_descriptor=(True, [])):
+        self.default_state = StateName('default')
+        
+        try:
+            self.simulation_dictionary
+        except:
+            self.simulation_dictionary = {self.default_state : {
+                                'value': False, 
+                                'transition_function': None,
+                                 'filters' : []
+                                 },
+                          }
+                                      
         self.population_size = population_size
-        self.iterations = iterations                     
-        self.initial_states = initial_states
+        self.iterations = iterations
+                             
+        if initial_states:
+            self.initial_states = initial_states
+        else:
+            self.initial_states = self.simulation_dictionary
+            
         self.population = [individual_class(state_class, self.initial_states)
                       for i in range(0,population_size)]
 
         if not analysis_function:
             self.analyse = self.default_analysis_function
+        
+        self.analysis_descriptor = analysis_descriptor
 
+    def add_state(self, *args, **kwargs):
+        for individual in self.population:
+            state_index = individual.add_state(self, args, kwargs)
+        return state_index
+             
     def simulate(self):
         for i in range(0,self.iterations):
             for individual in range(0,self.population_size):
                 self.population[individual].process_iteration(self.population, 
                                                               individual)
+
+    @staticmethod
+    def summation(values):
+        return ("sum", sum(values))
+
+    @staticmethod
+    def proportion(values):
+        return ("proportion", 
+                len(list(filter(lambda x: x, values))) / len(values))
+        
+    @staticmethod
+    def mean(values):
+        return ("mean", 
+                sum(values) / len(values) )
+    
+    @staticmethod
+    def median(values):
+        values = sorted(values)
+        length = len(values)
+        
+        if length == 0:
+            raise ValueError("median() arg is an empty sequence")
+        elif length == 1:
+            output = values[0]
+        elif length % 2 == 0:
+            output = (values[length//2] + values[length//2+1]) / 2
+        else:
+            output = values[length // 2 + 1]
+        return ("median", output)
+        
+    def _default_analysis(self):
+        # Creates a dictionary with state names as the key
+
+        output = {}
+
+        # Sum the states set to true for every state and insert in dictionary
+        for individual in self.population:
+            for state in individual.states.items():
+                value = state[1].value
+                if type(value)==bool:
+                    if value:
+                        output[state[0][1].label] = \
+                            output.get(state[0][1].label, 0) + 1
+                else: 
+                    output[state[0][1].label] = \
+                            output.get(state[0][1].label, 0) + value
+                
+        output['population']  = len(self.population)
+        return output
+        
+
+    def _specialised_analysis(self):
+        analysis = {}
+        for descriptor in self.analysis_descriptor[1]:
+            filtered_values = [individual.states[descriptor[0].key].value 
+                             for individual in 
+                             filter(lambda individual: 
+                                   passes_filters(individual.states, 
+                                                descriptor[1]['filters']), 
+                                   self.population)]
+            for calculation in descriptor[1]['calcs']:
+                if len(filtered_values):
+                    calc  = calculation(filtered_values)
+                    analysis[descriptor[1]['label'] + ':' + calc[0]] = calc[1] 
+                
+        return analysis
+
 
     def default_analysis_function(self):
         '''This simple analysis function counts the number of individuals in 
@@ -140,19 +261,17 @@ class Simulation:
         
         '''
 
-        # Creates a dictionary with state names as the key
+        if (self.analysis_descriptor[0]):            
+            default_output = self._default_analysis()
+        else:
+            default_output = {}
+
+        if (self.analysis_descriptor[1]):
+            calculated_output = self._specialised_analysis()
+        else:
+            calculated_output = {}
         
-        output = {}
-
-        # Sum the states set to true for every state and insert in dictionary
-        for individual in self.population:
-            for state in individual.states.items():
-                if state[1].value:
-                    output[state[0]] = output.get(state[0], 0) + 1
-                
-        output['population']  = len(self.population)
-
-        return output
+        return (default_output, calculated_output)
 
 if __name__ == '__main__': 
     
@@ -162,8 +281,13 @@ if __name__ == '__main__':
     
 
     s = Simulation()
-    print ("Start of simulation: ",
-            [(k, v) for k, v in s.analyse().items()])
+    print ("Start of simulation: ", "\n", 
+               [(k, v) for k, v in s.analyse()[0].items()], "\n",
+               [(k, v) for k, v in s.analyse()[1].items()])
     s.simulate()
-    print ("End of simulation: ", 
-            [(k, v) for k, v in s.analyse().items()])
+    print ("End of simulation: ", "\n", 
+               [(k, v) for k, v in s.analyse()[0].items()], "\n",
+               [(k, v) for k, v in s.analyse()[1].items()])
+
+
+        

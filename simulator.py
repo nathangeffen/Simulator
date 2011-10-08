@@ -1,12 +1,17 @@
 #!/usr/bin/env python
 
 import random
+from math import exp, log
+
+MINUTE = 1
+HOUR = 60
+DAY = 24*HOUR
+MONTH =(365.25/12)*DAY 
+YEAR = 365.25*DAY
 
 DEFAULT_POPULATION_SIZE = 10000
 DEFAULT_SIMULATIONS = 10
 DEFAULT_ITERATIONS = 70
-DEFAULT_TRANSITION_PROBABILITY = 0.009
-DEFAULT_TRANSITION_BACK_PROBABILITY = 0.7
 
 def state_incrementor():
     counter = -1
@@ -44,7 +49,10 @@ def passes_filters(states, filters):
 
 class State:    
     
-    def __init__(self, value, transition_function=None, filters=[]):
+    def __init__(self, 
+                 value, transition_function=None, 
+                 filters=[], 
+                 parameters={}):
         
         import types 
         
@@ -58,7 +66,7 @@ class State:
         else:
             self.transition_function = transition_function
         self.filters = filters
-
+        self.parameters = parameters
 
     def passes_filters(self, states):
         return passes_filters(states, self.filters)
@@ -68,25 +76,24 @@ class State:
             self.value = self.transition_function(self.value, 
                                                   individuals[index].states,
                                                   individuals, 
-                                                  index)
+                                                  index,
+                                                  self.parameters)
 
     @staticmethod
     def default_transition_function(value,
                                     states, 
                                     individuals,   
-                                    index, # index of this state's individual 
-                                    transition_probability=
-                                        DEFAULT_TRANSITION_PROBABILITY,
-                                    transition_back_probability=
-                                        DEFAULT_TRANSITION_BACK_PROBABILITY):
-    
+                                    index,
+                                    parameters): # index of this state's individual
         if value:
-            if random.random() < transition_back_probability:
+            if random.random() < \
+                parameters['TRANSITION_BACK_PROBABILITY']:
                 return False
             else:
                 return True
         else:
-            if random.random() < transition_probability:
+            if random.random() < \
+                parameters['TRANSITION_PROBABILITY']:
                 return True
             else:
                 return False
@@ -100,13 +107,20 @@ class Individual:
                  state_class=State,
                  initial_states={}):
         self.states = {}
-        for state in initial_states.items():
-            self.add_state(state)
+        for state_descriptor in initial_states.items():
+            self.add_state(state_descriptor)
 
     def add_state(self, state):
+        try: 
+            filters = state[1]['filters']
+        except KeyError: 
+            filters=[]
+            
         self.states[state[0].key] = State(state[1]['value'],
                                           state[1]['transition_function'], 
-                                          state[1]['filters'])
+                                          filters,
+                                          state[1] \
+                                          ['normalised_transition_parameters'])
 
     
     def process_iteration(self, individuals, index):
@@ -132,7 +146,7 @@ class Simulation:
     times. On each iteration it processes all the individuals, updating their 
     states  according to specified state functions.
     '''
-    
+        
     def __init__(self, 
                  population_size=DEFAULT_POPULATION_SIZE,
                  individual_class=Individual,
@@ -140,7 +154,9 @@ class Simulation:
                  initial_states={},
                  iterations=DEFAULT_ITERATIONS,
                  analysis_function=None,
-                 analysis_descriptor=(True, [])):
+                 analysis_descriptor=(True, []),
+                 time_period=YEAR):
+        
         self.default_state = StateName('default')
         
         try:
@@ -149,9 +165,15 @@ class Simulation:
             self.simulation_dictionary = {self.default_state : {
                                 'value': False, 
                                 'transition_function': None,
-                                 'filters' : []
-                                 },
-                          }
+                                'filters' : [],
+                                'transition_parameters' : {
+                                        "TRANSITION_PROBABILITY" : 
+                                            (0.009, YEAR),
+                                        "TRANSITION_BACK_PROBABILITY" : 
+                                            (0.7, YEAR),        
+                                        },
+                                },
+                        }
                                       
         self.population_size = population_size
         self.iterations = iterations
@@ -160,6 +182,14 @@ class Simulation:
             self.initial_states = initial_states
         else:
             self.initial_states = self.simulation_dictionary
+
+        self.time_period = time_period
+        for state in self.simulation_dictionary.values():
+            try:
+                state['normalised_transition_parameters'] = self._normalise(
+                                                state['transition_parameters'])
+            except KeyError:
+                state['normalised_transition_parameters'] = {}
             
         self.population = [individual_class(state_class, self.initial_states)
                       for i in range(0,population_size)]
@@ -169,6 +199,28 @@ class Simulation:
         
         self.analysis_descriptor = analysis_descriptor
 
+
+    def _normalise(self, parameters):
+        parameter_dict = {}
+        for parameter in parameters.items():
+            time_period_from = parameter[1][1]
+            if time_period_from != self.time_period:
+                print("HERE: ", time_period_from, self.time_period)
+                time_period_to = self.time_period
+                n = time_period_from / time_period_to
+                c = parameter[1][0] + 1.0 
+                # x^n = c ; we must solve for x
+                # n*ln(x) = ln(c)
+                # ln(x) = ln(c)/n
+                # x = exp(ln(c)/n)   
+                # Finally subtract the 1 that was added in the previous statement 
+                parameter_dict[parameter[0]] = exp(log(c)/n) - 1
+            else:
+                print("NO HERE: ", time_period_from, self.time_period)
+                parameter_dict[parameter[0]] = parameter[1][0] 
+            print ("DEBUG: ", parameter, parameter_dict[parameter[0]])
+        return parameter_dict
+
     def add_state(self, *args, **kwargs):
         for individual in self.population:
             state_index = individual.add_state(self, args, kwargs)
@@ -177,8 +229,10 @@ class Simulation:
     def simulate(self):
         for i in range(0,self.iterations):
             for individual in range(0,self.population_size):
-                self.population[individual].process_iteration(self.population, 
-                                                              individual)
+                self.population[individual]. \
+                    process_iteration(self.population, 
+                                            individual)
+                                            
 
     @staticmethod
     def summation(values):
@@ -210,6 +264,7 @@ class Simulation:
         return ("median", output)
         
     def _default_analysis(self):
+
         # Creates a dictionary with state names as the key
 
         output = {}
@@ -280,7 +335,7 @@ if __name__ == '__main__':
     random.seed(0)
     
 
-    s = Simulation()
+    s = Simulation(time_period=MONTH, iterations=70*12)
     print ("Start of simulation: ", "\n", 
                [(k, v) for k, v in s.analyse()[0].items()], "\n",
                [(k, v) for k, v in s.analyse()[1].items()])

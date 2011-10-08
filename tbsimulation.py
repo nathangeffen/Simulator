@@ -1,11 +1,6 @@
 import random
 import simulator
 
-PROBABILITY_OF_TB = 0.01
-PROBABILITY_OF_CURE = 0.7
-PROBABILITY_OF_DEATH = 1.0 / 70.0
-PROBABILITY_OF_DEATH_WITH_TB = 0.3
-
 active_tb = simulator.StateName('active tb')
 ever_had_tb = simulator.StateName('ever had tb')
 alive = simulator.StateName('alive')
@@ -18,7 +13,8 @@ class TBState(simulator.State):
     def ever_had_tb_transition(value,
                                states,
                                individuals,
-                               index): 
+                               index,
+                               parameters): 
         if states[active_tb.key].value:
             return True
         return value
@@ -27,17 +23,16 @@ class TBState(simulator.State):
     def tb_transition(value,
                       states,
                       individuals,
-                      index, 
-                      probability_of_tb=PROBABILITY_OF_TB,
-                      probability_of_cure=PROBABILITY_OF_CURE):
+                      index,
+                      parameters): 
     
         if value: # Individual has TB
-            if random.random() < probability_of_cure:
+            if random.random() < parameters['PROBABILITY_TB_CURE']:
                 return False
             else:
                 return True
         else: # Individual has not got TB
-            if random.random() < probability_of_tb:
+            if random.random() < parameters['PROBABILITY_TB']:
                 return True
             else:
                 return False
@@ -46,16 +41,15 @@ class TBState(simulator.State):
     def alive_transition(value,
                          states,
                          individuals,
-                         index, 
-                         death_without_tb_probability=PROBABILITY_OF_DEATH,
-                         death_with_tb_probability=PROBABILITY_OF_DEATH_WITH_TB):
+                         index,
+                         parameters):
         if states[active_tb.key].value:
-            if random.random() < death_with_tb_probability:
+            if random.random() < parameters['PROBABILITY_DEATH_WITH_TB']:
                 return False
             else:
                 return True
         else:
-            if random.random() < death_without_tb_probability:
+            if random.random() < parameters['PROBABILITY_DEATH']:
                 return False
             else:
                 return True
@@ -64,7 +58,8 @@ class TBState(simulator.State):
     def dead_with_tb_transition(value,
                                 states,
                                 individuals,
-                                index):
+                                index,
+                                parameters):
     
         if states[active_tb.key].value and \
             not states[alive.key].value:
@@ -75,7 +70,8 @@ class TBState(simulator.State):
     def age_transition(value,
             states,
             individuals,
-            index):
+            index,
+            parameters):
         if states[alive.key]:
             return (value + 1)   
 
@@ -88,6 +84,10 @@ class TBSimulation(simulator.Simulation):
                        'value': False, 
                        'transition_function': TBState.tb_transition,
                        'filters' : [(alive, lambda x: x)],
+                       'transition_parameters' : {
+                            "PROBABILITY_TB_CURE" :  (0.7, simulator.YEAR),
+                            "PROBABILITY_TB" : (0.01, simulator.YEAR),
+                            },
                     },
 
          ever_had_tb : {
@@ -100,7 +100,11 @@ class TBSimulation(simulator.Simulation):
          alive: { 
                     'value': True, 
                     'transition_function': TBState.alive_transition,
-                    'filters' :[(alive, lambda x: x,)]
+                    'filters' :[(alive, lambda x: x,)],
+                       'transition_parameters' : {
+                            "PROBABILITY_DEATH" :  (1.0 / 70.0, simulator.YEAR),
+                            "PROBABILITY_DEATH_WITH_TB" : (0.03, simulator.YEAR),
+                            },                    
                     },
          
          dead_with_tb : {
@@ -136,7 +140,8 @@ class TBSimulation(simulator.Simulation):
                  initial_states=simulation_dictionary,
                  iterations=simulator.DEFAULT_ITERATIONS,
                  analysis_function=None,
-                 analysis_descriptor=analysis_descriptor):
+                 analysis_descriptor=analysis_descriptor,
+                 time_period=simulator.YEAR):
 
         super().__init__(population_size, 
                          individual_class,
@@ -144,7 +149,8 @@ class TBSimulation(simulator.Simulation):
                          initial_states, 
                          iterations,
                          analysis_function,
-                         analysis_descriptor)
+                         analysis_descriptor,
+                         time_period)
 
         
 if __name__ == '__main__': 
@@ -152,7 +158,7 @@ if __name__ == '__main__':
     random.seed(0)
     
 
-    s = TBSimulation()
+    s = TBSimulation(time_period=simulator.MONTH, iterations=70)
     print ("Start of simulation: ", "\n", 
                [(k, v) for k, v in s.analyse()[0].items()], "\n",
                [(k, v) for k, v in s.analyse()[1].items()])

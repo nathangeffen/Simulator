@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import random
-from math import exp, log
 
 from simulation import simutils
 
@@ -229,6 +228,7 @@ class Simulation:
     def simulate(self):
         for i in range(0,self.iterations):
             for individual in range(0,self.population_size):
+                
                 self.population[individual]. \
                     process_iteration(self.population, 
                                             individual)
@@ -323,7 +323,7 @@ if __name__ == '__main__':
     random.seed(0)
     
 
-    s = Simulation(time_period=MONTH, iterations=70*12)
+    s = Simulation(time_period=YEAR, iterations=700)
     print ("Start of simulation: ", "\n", 
                [(k, v) for k, v in s.analyse()[0].items()], "\n",
                [(k, v) for k, v in s.analyse()[1].items()])
